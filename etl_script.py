@@ -1,56 +1,69 @@
 import kagglehub
-import time
 import logging
+import time
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, current_timestamp
+from pyspark.sql.functions import col, sum as _sum, desc, to_date
 
-# Logging configuration
-logging.basicConfig(
-    filename='etl_process.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 spark = SparkSession.builder \
-    .appName("JuniorReviewETL") \
-    .config("spark.executor.memory", "2g") \
+    .appName("PizzaSales") \
+    .config("spark.sql.shuffle.partitions", "2") \
     .getOrCreate()
 
 def run_etl():
     start_time = time.time()
     try:
-        # 1. Loading data from Kaggle
-        path = kagglehub.dataset_download("iamsouravbanerjee/customer-shopping-trends-dataset")
+        path = kagglehub.dataset_download("ylenialongo/pizza-sales")
         
-        # Read CSV files into DataFrame
-        df = spark.read.csv(f"{path}/*.csv", header=True, inferSchema=True)
-        logging.info(f"Data loaded successfully. Rows: {df.count()}")
+        # 1. Download and Read Data
+        # Reading CSV files into DataFrames
+        opts = {"header": True, "inferSchema": True}
+        details = spark.read.options(**opts).csv(f"{path}/order_details.csv")
+        orders = spark.read.options(**opts).csv(f"{path}/orders.csv")
+        pizzas = spark.read.options(**opts).csv(f"{path}/pizzas.csv")
+        types = spark.read.options(**opts).csv(f"{path}/pizza_types.csv")
 
-        # 2. Transformation
-        # Filtering and adding a timestamp
-        processed_df = df.filter(col("Age") > 18) \
-                         .withColumn("processed_at", current_timestamp())
-
-        # 3. Simple report (Aggregation)
-        report_df = processed_df.groupby("Category") \
-                                .agg({"Purchase Amount (USD)": "sum"}) \
-                                .withColumnRenamed("sum(Purchase Amount (USD))", "total_sales")
-
-        # 4. Saving the report as Parquet
-        report_df.write.mode("overwrite").parquet("output/sales_report.parquet")
+        # 2. Joins
+        # order_details -> orders (on order_id)
+        # order_details -> pizzas (on pizza_id)
+        # pizzas -> pizza_types (on pizza_type_id)
         
-        logging.info("ETL process completed successfully.")
+        df = details.join(orders, "order_id") \
+                    .join(pizzas, "pizza_id") \
+                    .join(types, "pizza_type_id")
 
+        # Date conversion
+        df = df.withColumn("date", to_date(col("date"), "yyyy-MM-dd"))
+
+        print("\n" + "="*30 + "\nReport\n" + "="*30)
+
+        # 1: How many cali_ckn ordered at 2015-01-04
+        q1 = df.filter((col("pizza_type_id") == "cali_ckn") & (col("date") == "2015-01-04")) \
+               .select(_sum("quantity")).collect()[0][0]
+        print(f"1. cali_ckn pizza ordered at 2015-01-04: {q1 or 0}")
+
+        # 2: Order ingredients 2015-01-02 at 18:27:50
+        q2 = df.filter((col("date") == "2015-01-02") & (col("time") == "18:27:50")) \
+          .select("name", "ingredients").show(truncate=False)
+        print(f"2. Order ingredients at 18:27:50: {q2}")
+
+        # 3: Top selling pizza between (2015-01-01 - 2015-01-08)
+        q3 = df.filter(col("date").between("2015-01-01", "2015-01-08")) \
+          .groupBy("category") \
+          .agg(_sum("quantity").alias("total_qty")) \
+          .orderBy(desc("total_qty")).show(1)
+        print(f"3. Top selling pizza between (2015-01-01 - 2015-01-08): {q3}")
+
+        # Save final DataFrame as Parquet
+        df.write.mode("overwrite").parquet("output/pizza_final_view.parquet")
+        
     except Exception as e:
-        logging.error(f"Error in ETL: {str(e)}")
+        logger.error(f"Error: {e}")
     finally:
-        # Statistics on resources and time
-        duration = time.time() - start_time
-        logging.info(f"Execution time: {duration:.2f} sec")
-        # Display resource configuration
-        executor_memory = spark.conf.get("spark.executor.memory")
-        logging.info(f"Memory used: {executor_memory}")
+        logger.info(f"Duration: {time.time() - start_time:.2f} seconds")
+        spark.stop()
 
 if __name__ == "__main__":
     run_etl()
-    spark.stop()
