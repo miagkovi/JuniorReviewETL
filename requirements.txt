@@ -1,2 +1,4 @@
 kagglehub
+psutil
 pyspark==3.5.0
+pytest

@@ -2,8 +2,8 @@ version: '3.8'
 services:
   spark-etl:
     build: .
-    # volumes:
-    #   - .:/app
-    #   - ./output:/app/output
     environment:
       - SPARK_MODE=local
+    # Uncomment the following lines to mount a local output directory
+    # volumes:
+    #   - ./output:/app/output
