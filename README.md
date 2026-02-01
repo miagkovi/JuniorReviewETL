@@ -10,7 +10,7 @@ docker-compose run spark-etl /bin/bash
 Execute the etl script manually:
 
 ```bash
-spark-submit etl_script.py
+pytest tests/ && /opt/spark/bin/spark-submit --master local[*] src/app.py
 ```
 
 Check files:

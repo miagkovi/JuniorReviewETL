@@ -33,8 +33,6 @@ def main():
         
         # 3. Transform data
         flat_df = build_pizza_sales_flat_table(details, orders, pizzas, types)
-        
-        print("\n" + "="*40 + "\nReport\n" + "="*40)
 
         # 1
         q1 = get_total_sales_by_date(flat_df, "cali_ckn", "2015-01-04")
